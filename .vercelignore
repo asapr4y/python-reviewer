@@ -1,0 +1,6 @@
+.tools/
+tmp/
+tests/
+node_modules/
+dist/
+scripts/*.py

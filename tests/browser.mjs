@@ -1,0 +1,40 @@
+﻿import {chromium} from '@playwright/test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+const db=JSON.parse(readFileSync('public/questions.json','utf8'));
+const browser=await chromium.launch({channel:'chrome',headless:true});
+const page=await browser.newPage({viewport:{width:1440,height:1100}});
+const errors=[];page.on('pageerror',error=>errors.push(error.message));
+await page.goto('http://localhost:4173');await page.locator('.question-card').waitFor();
+await page.locator('.image-zoom').first().click();assert.equal(await page.locator('#image-dialog').isVisible(),true);await page.locator('#close-image').click();
+await page.locator('[data-action="sources"]').click();assert.equal(await page.locator('.source-download').count(),2);await page.locator('[data-action="close-modal"]').click();
+await page.locator('[data-action="bookmark"]').click();assert.equal(await page.locator('[data-action="bookmark"]').getAttribute('aria-pressed'),'true');
+await page.locator('[data-action="reviewed"]').click();await page.reload();await page.locator('.question-card').waitFor();assert.match(await page.locator('.sidebar-progress p').innerText(),/1 of 76/);
+await page.locator('#search').fill('squareRoot');await page.waitForTimeout(250);assert.equal(await page.locator('.question-dot').count(),2);
+await page.locator('[data-action="clear-filters"]').count()&&await page.locator('[data-action="clear-filters"]').click();
+await page.locator('#search').fill('');await page.waitForTimeout(250);
+await page.locator('[data-action="jump"][data-id="s2-q38"]').click();assert.equal(await page.locator('.statement-table tbody tr').count(),4);
+await page.locator('[data-action="key"]').click();assert.match(await page.locator('.key-values').innerText(),/Yes/);
+await page.locator('[data-action="nav"][data-view="exam"]').first().click();await page.screenshot({path:'tmp/exam-setup-desktop.png',fullPage:true});
+for(const field of await page.locator('[name="source"]').all())await field.uncheck();await page.locator('.start-button').click();assert.match(await page.locator('#setup-error').innerText(),/Choose at least one/);
+for(const field of await page.locator('[name="source"]').all())await field.check();await page.locator('.start-button').click();
+assert.equal(await page.locator('.answer-key').count(),0);assert.equal(await page.locator('[data-action="key"]').count(),0);
+for(let i=0;i<db.questions.length;i++){
+ const q=db.questions[i];
+ if(q.type==='slots')for(let j=0;j<q.answers.length;j++)await page.locator(`[data-slot="${j}"]`).selectOption(q.answers[j]);
+ else for(const a of q.answers)await page.locator(`input[data-choice="${q.id}"][value="${a}"]`).check();
+ if(i===8){await page.reload();await page.locator('.question-card').waitFor();assert.ok(await page.locator('input:checked').count());}
+ if(i<db.questions.length-1)await page.locator('[data-action="exam-next"]').click();
+}
+await page.locator('[data-action="finish"]').last().click();await page.locator('[data-action="submit-exam"]').click();assert.match(await page.locator('.score-info h2').innerText(),/76.*76/s);assert.equal(await page.locator('.score-ring strong').innerText(),'100%');
+await page.locator('[data-filter="all"]').click();assert.equal(await page.locator('.result-card').count(),76);await page.locator('.result-card').first().locator('summary').first().click();assert.equal(await page.locator('.result-card').first().locator('.slot-label').count(),4);
+await page.screenshot({path:'tmp/results-desktop.png',fullPage:false});
+await page.locator('[data-action="new-exam"]').click();await page.locator('input[name="source"][value="1"]').uncheck();await page.locator('[name="count"]').selectOption('10');await page.locator('.start-button').click();
+await page.locator('input[value="C"]').check();await page.locator('[data-action="exam-next"]').click();await page.locator('input[value="B"]').check();await page.locator('[data-action="finish"]').first().click();await page.locator('[data-action="submit-exam"]').click();
+assert.equal(await page.locator('.score-ring strong').innerText(),'10%');assert.match(await page.locator('.score-breakdown').innerText(),/1 correct.*1 incorrect.*8 unanswered/s);assert.equal(await page.locator('.result-card').count(),9);
+await page.locator('.result-card').first().locator('summary').click();assert.equal(await page.locator('.result-card').first().locator('.wrong-option').count(),1);assert.equal(await page.locator('.result-card').first().locator('.correct-option').count(),1);
+await page.screenshot({path:'tmp/results-mixed-desktop.png',fullPage:false});await page.locator('[data-action="retry-missed"]').click();assert.equal(await page.locator('.question-dot').count(),9);
+await page.setViewportSize({width:390,height:844});await page.screenshot({path:'tmp/exam-mobile.png',fullPage:true});
+assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+await page.locator('[data-action="menu"]').click();await page.locator('[data-action="nav"][data-view="review"]').click();await page.locator('[data-action="menu"]').click();await page.locator('[data-action="source"][data-source="0"]').click();await page.locator('[data-action="jump"][data-id="s2-q1"]').click();await page.evaluate(()=>scrollTo(0,0));await page.screenshot({path:'tmp/reviewer-mobile.png',fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+assert.deepEqual(errors,[]);await browser.close();console.log('PASS: reviewer search, bookmarks, progress, tables, setup validation, all 200 answer controls, exam resume, perfect/mixed scores, answer comparison, retry missed, and mobile layout.');

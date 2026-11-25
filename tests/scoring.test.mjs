@@ -1,0 +1,18 @@
+﻿import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync,existsSync} from 'node:fs';
+import { gradeQuestion, gradeExam, shuffle, loadState } from '../public/logic.js';
+const {questions,sources}=JSON.parse(readFileSync(new URL('../public/questions.json',import.meta.url),'utf8'));
+test('both sources have every question and all assets exist',()=>{
+ assert.equal(questions.length,76);assert.equal(new Set(questions.map(q=>q.id)).size,76);
+ for(const source of sources){assert.deepEqual(questions.filter(q=>q.source===source.id).map(q=>q.number),Array.from({length:source.count},(_,i)=>i+1));assert.ok(existsSync('public/'+source.file));}
+ for(const q of questions){assert.ok(q.body.length);for(const block of [...q.body,...q.key,...q.notes,...(q.options||[]).flatMap(o=>o.parts||[])])if(block.kind==='image')assert.ok(existsSync('public/'+block.src),block.src);if(q.type==='slots'){assert.equal(q.slotChoices.length,q.answers.length);q.answers.forEach((a,i)=>assert.ok(q.slotChoices[i].includes(a),q.id));}else{assert.equal(new Set(q.options.map(o=>o.value)).size,q.options.length);q.answers.forEach(a=>assert.ok(q.options.some(o=>o.value===a),q.id));}}
+});
+test('all 76 complete source answers score 100%',()=>{const responses=Object.fromEntries(questions.map(q=>[q.id,[...q.answers]]));const result=gradeExam(questions,responses);assert.deepEqual([result.correct,result.wrong,result.unanswered,result.percentage],[76,0,0,100]);});
+test('empty exam scores zero and tracks unanswered',()=>{const result=gradeExam(questions,{});assert.deepEqual([result.correct,result.wrong,result.unanswered,result.percentage],[0,0,76,0]);});
+test('multi-select requires exact set, accepts any selection order, rejects extras and duplicate answers',()=>{const q=questions.find(q=>q.id==='s1-q12');assert.equal(gradeQuestion(q,['E','B']).correct,true);for(const response of [['B'],['B','E','A'],['B','B']])assert.equal(gradeQuestion(q,response).correct,false);});
+test('ordered selections require all positions in the source order',()=>{const q=questions.find(q=>q.id==='s2-q41');assert.equal(gradeQuestion(q,['F','D','E','B']).correct,true);assert.equal(gradeQuestion(q,['D','F','E','B']).correct,false);assert.equal(gradeQuestion(q,['F','','E','B']).answered,false);});
+test('mixed result tallies correct, wrong and unanswered without losing selected answers',()=>{const qs=['s2-q1','s2-q2','s2-q3'].map(id=>questions.find(q=>q.id===id));const result=gradeExam(qs,{'s2-q1':['C'],'s2-q2':['B']});assert.deepEqual([result.correct,result.wrong,result.unanswered,result.percentage],[1,1,1,33]);assert.deepEqual(result.results[1].selected,['B']);assert.deepEqual(result.results[1].expected,['A']);});
+test('conflicting source keys remain separate',()=>{assert.deepEqual(questions.find(q=>q.id==='s1-q3').answers,['B']);assert.deepEqual(questions.find(q=>q.id==='s2-q2').answers,['A']);assert.match(questions.find(q=>q.id==='s1-q3').options.find(o=>o.value==='B').text,/float/);assert.match(questions.find(q=>q.id==='s2-q2').options.find(o=>o.value==='A').text,/int/);assert.deepEqual(questions.find(q=>q.id==='s1-q4').answers.slice(-1),['Invalid syntax']);assert.deepEqual(questions.find(q=>q.id==='s2-q19').answers,['C','D','B']);});
+test('shuffle preserves questions without mutating the input',()=>{const input=[1,2,3,4],out=shuffle(input,()=>0);assert.deepEqual(input,[1,2,3,4]);assert.deepEqual([...out].sort(),input);assert.notDeepEqual(out,input);});
+test('corrupt or unavailable storage safely falls back',()=>{for(const text of ['bad','null','[]'])assert.deepEqual(loadState({getItem:()=>text}),{});assert.deepEqual(loadState({getItem:()=>{throw new Error('denied');}}),{});});
